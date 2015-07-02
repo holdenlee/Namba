@@ -393,7 +393,7 @@ renderPete : Model -> Element
 renderPete (Model m) = 
     case m.curBlock of
       Nothing -> container bwidth (bheight+30) midBottom <| image 30 30 "pete.gif"
-      Just b -> (renderBlock b) `above` (container bwidth bheight middle <| image 30 30 "hold.gif")
+      Just b -> (renderBlock b) `above` (container bwidth 30 middle <| image 30 30 "hold.gif")
 
 renderTop : Model -> Element
 renderTop (Model m) = flow right <| L.map (\i -> if i==m.x then renderPete (Model m) else (container bwidth (bheight + 30) middle empty)) [0..(m.w-1)]
