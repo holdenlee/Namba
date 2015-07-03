@@ -220,7 +220,7 @@ startGame n =
              inputs = li,
              nextInput = defInputFunc,
              nextInts = li',
-             spawnTime = 10*second,
+             spawnTime = 20*second,
              spawnInts = defGetInts 1,
                  --generate a block and block loation regularly
              score =0,
@@ -267,11 +267,8 @@ stepGame inp m =
   --(watchSummary "stacks" (.stacks << getModel)) <| 
   watch "model" <| 
     case inp of
-      Activate -> 
-          case m.curBlock of
-            Nothing -> m
-            _ -> {m | activated <- True}
-                 --if no current block, do not activate!
+      Activate b -> 
+          {m | activated <- b}
       Left ->
            {m | x <- (m.x-1)%(m.w)}
       Right -> 
@@ -285,21 +282,27 @@ stepGame inp m =
                                          |> updateCurStack tail'
                                          |> resolveSuccesses
       Spell i -> 
-          case m.curBlock of
-            Nothing -> {m | curBlock <- D.get i spellDict}
-            Just _ -> m                
+          let
+              cs = curStack m
+              b = M.withDefault (numBlock 0) <| D.get i spellDict
+          in
+            if L.length cs < m.h
+            then
+                m |> updateCurStack (if m.activated then applyStack b else (\x -> b::x))
+                  |> resolveSuccesses
+            else 
+                m      
       Drop -> 
           case m.curBlock of
             Nothing ->  m 
                        --no block to drop!
             Just b -> 
                 let
-                    cs = curStack ( m)
+                    cs = curStack m
                 in
                   if L.length cs < m.h
                   then
-                       {m | curBlock <- Nothing,
-                                 activated <- False} 
+                       {m | curBlock <- Nothing} 
                          |> updateCurStack (if m.activated then applyStack b else (\x -> b::x))
                          |> resolveSuccesses
                   else 
@@ -317,7 +320,7 @@ stepGame inp m =
                    {m | seed <- s',
                         timeSinceSpawn <- newT - m.spawnTime,
                         nextInts <- m.nextInts ++ li,
-                        spawnTime <- 100*second/((toFloat m.score) + 10)
+                        spawnTime <- 200*second/((toFloat m.score) + 10)
                         }
             else  {m | timeSinceSpawn <- newT}
       MoreBlocks _ -> 
@@ -325,14 +328,14 @@ stepGame inp m =
             [] ->  m 
                   --shouldn't happen
             h::rest -> 
-               if L.length (curStack ( m)) < m.h
+               if L.length (curStack m) < m.h
                then
                    let
                        (b, s) = m.nextInput m.seed
                    in
                       {m | seed <- s,
-                                inputs <- rest ++ [b]} 
-                       |> updateCurStack (applyStack h)
+                           inputs <- rest ++ [b]} 
+                       |> updateCurStack (if m.activated then applyStack h else (\x -> h::x))
                        |> resolveSuccesses
                else 
                     m
@@ -492,7 +495,7 @@ renderWaiting w h =
 
 
 --SIGNAL
-type Input = Activate | Drop | Pickup | Left | Right | MoreBlocks Time | TimeDelta Time | Spell Int
+type Input = Activate Bool | Drop | Pickup | Left | Right | MoreBlocks Time | TimeDelta Time | Spell Int
 
 whenPress : Signal Bool -> Signal Bool
 whenPress k = filter identity False <| dropRepeats k
@@ -509,7 +512,8 @@ spell = mergeMany (L.map (\i -> keyCodeToState (48+i) (Spell i)) [1..4])
 37 40 39
 -}
 input : Signal Input 
-input = mergeMany [keyCodeToState 65 Activate, 
+input = mergeMany [map Activate shift,
+                   --keyCodeToState 65 Activate, 
                    keyCodeToState 40 Drop,
                    keyCodeToState 38 Pickup,
                    keyCodeToState 37 Left,

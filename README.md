@@ -4,17 +4,20 @@ Instructions
 Create the numbers on the stack on the right (top first).
 
 Controls:
-* LEFT/RIGHT: Move Pete
-* UP: Pick up block
-* DOWN: Drop block
-* 'a': Activate block (you need to activate an operation before it will operate on numbers)
-* SPACE: Drop block from input stack (automatically activates)
-* 1,2,3,4: Pick up a +, -, \*, \/.
+* LEFT/RIGHT: Move Pete.
+* UP: Pick up block.
+* DOWN: Drop block.
+* SPACE: Drop block from input stack.
+* 1,2,3,4: Drop a +, -, \*, \/.
+* SHIFT (+DOWN, SPACE, 1, 2, 3, 4): Drop and activate block.
 
 Log
 ===
 
-7-2-15:
+7-2-15 (2):
+* Changed the activation rule to: block is activated if you press SHIFT when releasing. Pressing number directly releases the block, sidestepping Pete having to hold it first.
+
+7-2-15 (1):
 * Changed the game so that incoming blocks can be placed at Pete's leisure using SPACE, and the basic operation blocks +, -, \*, / can be accessed using 1, 2, 3, 4. New output blocks come in every n seconds where n starts out being 10. Game ends when output blocks overflow.
 * Added randomness (uses seed based on time).
 * TODO: Game over screen, make it easier to activate blocks (right now it's very clunky). E.g., use Shift-# or Shift-SPACE.
