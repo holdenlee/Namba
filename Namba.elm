@@ -135,23 +135,25 @@ applyStack b bs =
 
 
 --MODEL
-type Model = Model {w: Int,
-                    h: Int,
-                    stacks : A.Array (List Block),
-                    x: Int,
-                    curBlock : Maybe Block,
-                    activated: Bool,
-                    seed: Seed,
-                    --spawnProb : Float,
-                    spawnTime : Time, 
-                              --in ms
-                    spawnFunc : Model -> Seed -> ((Int, Block), Seed),
---generate a block and block loation regularly
-                    nextInts : List Int,
-                    getInts : Model -> Seed -> (List Int, Seed), 
-                    score : Int,
-                    timeSinceSpawn : Time
-                   }
+type alias Game = {w: Int,
+                   h: Int,
+                   stacks : A.Array (List Block),
+                   x: Int,
+                   curBlock : Maybe Block,
+                   activated: Bool,
+                   seed: Seed,
+                   --spawnProb : Float,
+                   inputs : List Block,
+                   nextInput : Seed -> (Block, Seed),
+                   --generate a block and block loation regularly
+                   nextInts : List Int,
+                   spawnTime : Time,
+                   spawnInts : Seed -> (List Int, Seed), 
+                   score : Int,
+                   timeSinceSpawn : Time
+                  }
+
+type Model = Waiting | Ingame Game
 
 defWidth = 4
 
@@ -165,13 +167,12 @@ chooseByProbs r li =
           then i
           else chooseByProbs (r - c) rest
 
-probListToSpawnFunc : List (Block, Float) -> Model -> Seed -> ((Int, Block), Seed)
-probListToSpawnFunc li (Model m) s =
+probListToInputFunc : List (Block, Float) -> Seed -> (Block, Seed)
+probListToInputFunc li s =
     let
-        (i, s') = generate (int 0 (m.w-1)) s  
-        (r, s'') = generate (float 0 1) s'
+        (r, s') = generate (float 0 1) s
     in
-      ((i, chooseByProbs r li),s'')
+      (chooseByProbs r li,s')
 
 numBlock : Int -> Block
 numBlock n = BExpr (Leaf (AInt n)) (Leaf TInt)
@@ -186,96 +187,123 @@ normalizeList li =
     in
       L.map (\(x,y) -> (x,(toFloat y)/s)) li
 
-defSpawnFunc : Model -> Seed -> ((Int, Block), Seed)
-defSpawnFunc = probListToSpawnFunc <| normalizeList 
+defInputFunc : Seed -> (Block, Seed)
+defInputFunc = probListToInputFunc <| normalizeList 
                ((L.map (\x -> (numBlock x,1)) [(-10)..10])
-                ++ [(opBlock "+", 4),
-                    (opBlock "-", 3),
-                    (opBlock "*", 4),
-                    (opBlock "/", 2),
-                    (Bomb, 1),
+                ++ [(Bomb, 1),
                     (Clear, 1),
                     (Copy, 2),
                     (Rock, 1)
                     ])
-               
-{-[(numBlock 0, 0.1),
-                                    (numBlock 1, 0.2),
-                                    (numBlock 2, 0.1),
-                                    (numBlock 3, 0.1),
-                                    (opBlock "+",0.2),
-                                    (opBlock "-",0.1),
-                                    (opBlock "*",0.1),
-                                    (opBlock "/",0.1)
-                                   ] 
--}
---add this!
 
 defGetInts : Int -> Seed -> (List Int, Seed)
 defGetInts l s = generate (list l (int (-100) 100)) s
 
-start : Int -> Model
-start n = 
+
+startGame : Int -> Game
+startGame n = 
     let 
-        (li,s) = defGetInts 5 (initialSeed n)
+        h=10
+        (li,s) = generate (list h (customGenerator defInputFunc)) (initialSeed n)
+        (li',s') = defGetInts 5 s
     in
-      Model {w=defWidth,
-             h=10,
-             stacks=A.repeat defWidth [] |> A.set 0 [BExpr (Leaf (AInt 0)) (Leaf TInt)],
+            {w=defWidth,
+             h=h,
+             stacks=A.repeat defWidth [], 
+--|> A.set 0 [BExpr (Leaf (AInt 0)) (Leaf TInt)],
              x=0,
              curBlock = Nothing,
              activated = False,
-             seed = s, 
+             seed = s', 
                  --add a random seed
              --spawnProb = 0.025, 
-             spawnTime = 4*second,
-             spawnFunc = defSpawnFunc,
+             inputs = li,
+             nextInput = defInputFunc,
+             nextInts = li',
+             spawnTime = 10*second,
+             spawnInts = defGetInts 1,
                  --generate a block and block loation regularly
-             nextInts = li,
-             getInts = (\_ -> defGetInts 1), 
              score =0,
              timeSinceSpawn = 0
                 }
 
-getModel (Model m) = m
+curStack : Game -> List Block
+curStack m = M.withDefault [] <| A.get m.x m.stacks
+
+tail' : List a -> List a
+tail' li = 
+    case li of
+      [] -> []
+      h::rest -> rest
+
+updateCurStack : (List Block -> List Block) -> Game -> Game
+updateCurStack f m = 
+    {m | stacks <- A.set m.x (f <| curStack m) m.stacks}
+--dunno if this memo'izes curStack?
+
+isGameOver : Game -> Bool
+isGameOver g = L.length g.nextInts > g.h
+
+step : Input -> Model -> Model
+step inp m = 
+    case m of 
+      Ingame g -> 
+          let 
+              g' = stepGame inp g
+          in
+            if isGameOver g' then Waiting else Ingame g'
+      Waiting -> 
+          case inp of
+            MoreBlocks i -> Ingame (startGame <| round i)
+            _ -> Waiting
+
+start = Waiting
+
+spellDict = D.fromList [(1, opBlock "+"), (2, opBlock "-"), (3, opBlock "*"), (4, opBlock "/")]
 
 --UPDATE
-step : Input -> Model -> Model
-step inp (Model m) = 
+stepGame : Input -> Game -> Game
+stepGame inp m = 
   --(watchSummary "stacks" (.stacks << getModel)) <| 
   watch "model" <| 
     case inp of
       Activate -> 
           case m.curBlock of
-            Nothing -> Model m
-            _ -> Model {m | activated <- True}
+            Nothing -> m
+            _ -> {m | activated <- True}
                  --if no current block, do not activate!
       Left ->
-          Model {m | x <- (m.x-1)%(m.w)}
+           {m | x <- (m.x-1)%(m.w)}
       Right -> 
-          Model {m | x <- (m.x+1)%(m.w)}
+           {m | x <- (m.x+1)%(m.w)}
       Pickup ->
           case (A.get m.x m.stacks, m.curBlock) of
-            (Just [],_) -> Model m
-            (_, Just _) -> Model m
+            (Just [],_) ->  m
+            (_, Just _) ->  m
              --if either the stack is empty or already have a block, do not pick up one.
-            (Just (top::rest), _) -> Model {m | curBlock <- Just top,
-                                                stacks <- A.set m.x rest m.stacks} |> resolveSuccesses
+            (Just (top::_), _) ->  {m | curBlock <- Just top}
+                                         |> updateCurStack tail'
+                                         |> resolveSuccesses
+      Spell i -> 
+          case m.curBlock of
+            Nothing -> {m | curBlock <- D.get i spellDict}
+            Just _ -> m                
       Drop -> 
           case m.curBlock of
-            Nothing -> Model m 
+            Nothing ->  m 
                        --no block to drop!
             Just b -> 
                 let
-                    curStack = M.withDefault [] <| A.get m.x m.stacks
-                    newStack = if m.activated 
-                               then applyStack b curStack
-                               else b::curStack
+                    cs = curStack ( m)
                 in
-                  Model {m | curBlock <- Nothing,
-                             stacks <- A.set m.x newStack m.stacks,
-                             activated <- False} |> resolveSuccesses
-                  --TODO: need to check for success
+                  if L.length cs < m.h
+                  then
+                       {m | curBlock <- Nothing,
+                                 activated <- False} 
+                         |> updateCurStack (if m.activated then applyStack b else (\x -> b::x))
+                         |> resolveSuccesses
+                  else 
+                       m
       TimeDelta td ->
           let
               newT = m.timeSinceSpawn + td
@@ -283,64 +311,67 @@ step inp (Model m) =
             --assume there isn't so much lag that two time intervals pass between updates
             if newT > m.spawnTime 
             then 
-                let 
-                    ((i,b),s) = m.spawnFunc (Model m) (m.seed)
-                    stack = M.withDefault [] <| A.get i m.stacks
+                let
+                    (li, s') = m.spawnInts m.seed
                 in
-                  Model {m | stacks <- A.set i (stack++[b]) m.stacks,
-                             seed <- s,
-                             timeSinceSpawn <- newT - m.spawnTime
-                        } |> resolveSuccesses
-                        --TODO: check for stack overflow
-                        --(GAME OVER CONDITION)
-            else Model {m | timeSinceSpawn <- newT}
+                   {m | seed <- s',
+                        timeSinceSpawn <- newT - m.spawnTime,
+                        nextInts <- m.nextInts ++ li,
+                        spawnTime <- 100*second/((toFloat m.score) + 10)
+                        }
+            else  {m | timeSinceSpawn <- newT}
+      MoreBlocks _ -> 
+          case m.inputs of
+            [] ->  m 
+                  --shouldn't happen
+            h::rest -> 
+               if L.length (curStack ( m)) < m.h
+               then
+                   let
+                       (b, s) = m.nextInput m.seed
+                   in
+                      {m | seed <- s,
+                                inputs <- rest ++ [b]} 
+                       |> updateCurStack (applyStack h)
+                       |> resolveSuccesses
+               else 
+                    m
 
-resolveSuccesses' : Model -> Model
-resolveSuccesses' (Model m) = 
-    case L.foldl (resolveSuccess) (Model m) [0..(m.w-1)] of
-      Model m2 ->
+resolveSuccesses' :  Game -> Game 
+resolveSuccesses' m = 
+    case L.foldl (resolveSuccess) m [0..(m.w-1)] of
+       m2 ->
           if L.length m2.nextInts == L.length m.nextInts 
-          then Model m2
-          else resolveSuccesses' (Model m2)
+          then m2
+          else resolveSuccesses' m2
 --this does it all in one go. (However, may want to change so does only 1 at a time, for sake of visual effects.)
 --TODO: add in new
 
 --being lazy right now - this is not what I want
-resolveSuccesses : Model -> Model
-resolveSuccesses (Model m) = 
-    let
-        m' = getModel <| resolveSuccesses' (Model m)
-        (li, s') = 
-            if L.length m.nextInts /= (L.length m'.nextInts)
-            then m.getInts (Model m) (m.seed)
-            else ([],m.seed)
-    in
-      Model {m' | seed <- s',
-                  nextInts <- m'.nextInts ++ li} 
---: Model -> Seed -> (List Int, Seed), 
-                    
+resolveSuccesses :  Game -> Game 
+resolveSuccesses = resolveSuccesses'                    
 
 {- index -}
-resolveSuccess : Int -> Model -> Model
-resolveSuccess n (Model m) = 
+resolveSuccess : Int -> Game -> Game 
+resolveSuccess n m = 
     case (A.get m.x m.stacks) of
       Just ((BExpr (Leaf (AInt p)) _)::rest) -> 
           --clunky...
           case m.nextInts of
-            [] -> Model m
+            [] ->  m
                   --no more blocks left to match
             h::following -> 
                if p == h 
                then 
-                   Model {m | stacks <- A.set m.x rest m.stacks,
-                              nextInts <- following,
-                              score <- m.score + 1
+                   {m | stacks <- A.set m.x rest m.stacks,
+                        nextInts <- following,
+                        score <- m.score + 1
                                   --need to add in new!
                                   --delete (SHOULD THIS BE THE BEHAVIOR?)
-                         }
+                   }
                else 
-                   Model m
-      _ -> Model m
+                   m
+      _ -> m
 
 eval : Expr -> Int
 eval ex = 
@@ -389,14 +420,14 @@ collageAbs w h tuples elems =
     collage w h (zipMap (\(x,y) -> \elem -> move ( (-(toFloat w)/2 + (toFloat (widthOf elem))/2 + toFloat x),  (-(toFloat h)/2 + (toFloat (heightOf elem))/2 + toFloat y)) (toForm elem)) tuples elems)
 
 
-renderPete : Model -> Element
-renderPete (Model m) = 
+renderPete : Game -> Element
+renderPete m = 
     case m.curBlock of
       Nothing -> container bwidth (bheight+30) midBottom <| image 30 30 "pete.gif"
       Just b -> (renderBlock b) `above` (container bwidth 30 middle <| image 30 30 "hold.gif")
 
-renderTop : Model -> Element
-renderTop (Model m) = flow right <| L.map (\i -> if i==m.x then renderPete (Model m) else (container bwidth (bheight + 30) middle empty)) [0..(m.w-1)]
+renderTop : Game -> Element
+renderTop m = flow right <| L.map (\i -> if i==m.x then renderPete ( m) else (container bwidth (bheight + 30) middle empty)) [0..(m.w-1)]
 
 renderBlock' : Int -> Int -> Block -> Element
 renderBlock' w h b = 
@@ -429,21 +460,39 @@ renderStacks n = (flow right) << (L.map (renderStack n)) << A.toList
 
 column w h = container w h midBottom
 
+renderInputs : Int -> List Block -> Element
+renderInputs h li = column 60 (bheight*(h+1) + 30) <| flow down <| L.map (renderBlock' 60 bheight) li
+
 renderNextInts : Int -> List Int -> Element
 renderNextInts h li = column 60 (bheight*(h+1) + 30) <| flow down <| L.map (renderBlock' 60 bheight << numBlock) li
 
-renderInfoPanel : Model -> Element
-renderInfoPanel (Model m) = container 60 (bheight*(m.h+1) + 30) middle <| centered <| (Text.height 30 <| Text.monospace (Text.fromString (toString m.score)))
+renderInfoPanel : Game -> Element
+renderInfoPanel ( m) = container 60 (bheight*(m.h+1) + 30) middle <| centered <| (Text.height 30 <| Text.monospace (Text.fromString (toString m.score)))
+
+renderGame : Game -> Element
+renderGame m = 
+    flow right
+         [renderInputs m.h m.inputs,
+          renderTop m `above` renderStacks m.h m.stacks,
+          renderNextInts m.h m.nextInts,
+          renderInfoPanel m]
+
+totalW = 4 * bwidth + 3*60
+totalH = 11 * bheight + 30
 
 render : Model -> Element
-render (Model m) = 
-    flow right
-         [(renderTop (Model m) `above` renderStacks m.h m.stacks),
-                                                                      (renderNextInts m.h m.nextInts),
-                                                                      renderInfoPanel (Model m)]
+render m = 
+    case m of
+      Ingame g -> renderGame g
+      Waiting -> renderWaiting totalW totalH
+
+renderWaiting : Int -> Int -> Element
+renderWaiting w h = 
+    collage w h [(Text.fromString "Press SPACE to begin." |> Text.color white) |> centered |> toForm] |> color black
+
 
 --SIGNAL
-type Input = Activate | Drop | Pickup | Left | Right | MoreBlocks | TimeDelta Time
+type Input = Activate | Drop | Pickup | Left | Right | MoreBlocks Time | TimeDelta Time | Spell Int
 
 whenPress : Signal Bool -> Signal Bool
 whenPress k = filter identity False <| dropRepeats k
@@ -451,6 +500,10 @@ whenPress k = filter identity False <| dropRepeats k
 keyCodeToState : Int -> a -> Signal a 
 keyCodeToState k state = map (always state) (whenPress (isDown k))
 
+spell : Signal Input
+spell = mergeMany (L.map (\i -> keyCodeToState (48+i) (Spell i)) [1..4])
+
+{- 48+ -}
 {-
    38
 37 40 39
@@ -461,9 +514,13 @@ input = mergeMany [keyCodeToState 65 Activate,
                    keyCodeToState 38 Pickup,
                    keyCodeToState 37 Left,
                    keyCodeToState 39 Right,
-                   keyCodeToState 32 MoreBlocks,
+                   map (\(i,_) -> MoreBlocks i) (timestamp <| whenPress (isDown 32)),
+--^this is hacky right now!
+--                   keyCodeToState 32 MoreBlocks,
+--http://stackoverflow.com/questions/29453679/how-do-i-get-the-current-time-in-elm
                                   --space
-                   (map TimeDelta (fps 20))
+                   (map TimeDelta (fps 20)),
+                   spell
                   ]
 
-main = map render (foldp step (start 0) input)
+main = map render (foldp step start input)

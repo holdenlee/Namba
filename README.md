@@ -8,10 +8,16 @@ Controls:
 * UP: Pick up block
 * DOWN: Drop block
 * 'a': Activate block (you need to activate an operation before it will operate on numbers)
-* SPACE: Receive another block
+* SPACE: Drop block from input stack (automatically activates)
+* 1,2,3,4: Pick up a +, -, \*, \/.
 
 Log
 ===
+
+7-2-15:
+* Changed the game so that incoming blocks can be placed at Pete's leisure using SPACE, and the basic operation blocks +, -, \*, / can be accessed using 1, 2, 3, 4. New output blocks come in every n seconds where n starts out being 10. Game ends when output blocks overflow.
+* Added randomness (uses seed based on time).
+* TODO: Game over screen, make it easier to activate blocks (right now it's very clunky). E.g., use Shift-# or Shift-SPACE.
 
 7-1-15:
 * Stacks receive new blocks from the bottom. Basic game works, but there is no game-over condition. No higher-order function blocks yet.
