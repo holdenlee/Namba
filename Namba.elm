@@ -51,7 +51,6 @@ applyType pm t t1 =
           case t1 of
             Leaf _ -> Nothing
             Node li1 -> (L.foldl (flip M.andThen) (Just pm) <| L.map (\(t',t1') -> (\x -> applyType x t' t1')) (L.map2 (,) li li1))
---(\(t',t1') mpm -> (fmap (\x -> applyType x t' t1')) mpm) (Just pm) (map2 (,) li li1)    
                                          -- ex. TInt
 
 subst : PMatch -> Type -> Type
@@ -104,7 +103,6 @@ apply b b1 =
                             in
                               if (t2 |> watch "5") == Leaf TInt
                               then [BExpr (Leaf <| AInt <| eval ex2) t2]
---eval being called wrongly here
                               else [BExpr (combineTrees ex ex1) (rchild t)]
                         _ -> [b,b1]
                              --fail
@@ -142,15 +140,14 @@ type alias Game = {w: Int,
                    curBlock : Maybe Block,
                    activated: Bool,
                    seed: Seed,
-                   --spawnProb : Float,
                    inputs : List Block,
                    nextInput : Seed -> (Block, Seed),
-                   --generate a block and block loation regularly
                    nextInts : List Int,
                    spawnTime : Time,
                    spawnInts : Seed -> (List Int, Seed), 
                    score : Int,
-                   timeSinceSpawn : Time
+                   timeSinceSpawn : Time,
+                   gameOver : Bool
                   }
 
 type Model = Waiting | Ingame Game
@@ -190,10 +187,8 @@ normalizeList li =
 defInputFunc : Seed -> (Block, Seed)
 defInputFunc = probListToInputFunc <| normalizeList 
                ((L.map (\x -> (numBlock x,1)) [(-10)..10])
-                ++ [(Bomb, 1),
-                    (Clear, 1),
-                    (Copy, 2),
-                    (Rock, 1)
+                ++ [(Clear, 1),
+                    (Copy, 3)
                     ])
 
 defGetInts : Int -> Seed -> (List Int, Seed)
@@ -210,21 +205,18 @@ startGame n =
             {w=defWidth,
              h=h,
              stacks=A.repeat defWidth [], 
---|> A.set 0 [BExpr (Leaf (AInt 0)) (Leaf TInt)],
              x=0,
              curBlock = Nothing,
              activated = False,
              seed = s', 
-                 --add a random seed
-             --spawnProb = 0.025, 
              inputs = li,
              nextInput = defInputFunc,
              nextInts = li',
              spawnTime = 20*second,
              spawnInts = defGetInts 1,
-                 --generate a block and block loation regularly
              score =0,
-             timeSinceSpawn = 0
+             timeSinceSpawn = 0,
+             gameOver = False
                 }
 
 curStack : Game -> List Block
@@ -248,10 +240,16 @@ step : Input -> Model -> Model
 step inp m = 
     case m of 
       Ingame g -> 
-          let 
-              g' = stepGame inp g
-          in
-            if isGameOver g' then Waiting else Ingame g'
+          if g.gameOver
+          then
+              case inp of
+                MoreBlocks _ -> Waiting
+                _ -> Ingame g
+          else
+              let 
+                  g' = stepGame inp g
+              in
+                if isGameOver g' then Ingame {g' | gameOver <- True} else Ingame g'
       Waiting -> 
           case inp of
             MoreBlocks i -> Ingame (startGame <| round i)
@@ -473,7 +471,14 @@ renderInfoPanel : Game -> Element
 renderInfoPanel ( m) = container 60 (bheight*(m.h+1) + 30) middle <| centered <| (Text.height 30 <| Text.monospace (Text.fromString (toString m.score)))
 
 renderGame : Game -> Element
-renderGame m = 
+renderGame g = 
+    layers [renderGame' g, if g.gameOver
+                           then centered <| Text.height 30 <| Text.monospace (Text.fromString "GAME OVER. Press space.")
+                           else empty]
+    
+
+renderGame' : Game -> Element
+renderGame' m = 
     flow right
          [renderInputs m.h m.inputs,
           renderTop m `above` renderStacks m.h m.stacks,
