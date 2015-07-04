@@ -8,11 +8,15 @@ Controls:
 * UP: Pick up block.
 * DOWN: Drop block.
 * SPACE: Drop block from input stack.
-* 1,2,3,4: Drop a +, -, \*, \/.
+* 1,2,3,4: Drop a +, -, \*, /.
 * SHIFT (+DOWN, SPACE, 1, 2, 3, 4): Drop and activate block.
 
 Log
 ===
+
+7-3-15:
+* Add game over screen.
+* Change input block frequencies
 
 7-2-15 (2):
 * Changed the activation rule to: block is activated if you press SHIFT when releasing. Pressing number directly releases the block, sidestepping Pete having to hold it first.

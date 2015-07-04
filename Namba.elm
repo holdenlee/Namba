@@ -473,7 +473,7 @@ renderInfoPanel ( m) = container 60 (bheight*(m.h+1) + 30) middle <| centered <|
 renderGame : Game -> Element
 renderGame g = 
     layers [renderGame' g, if g.gameOver
-                           then centered <| Text.height 30 <| Text.monospace (Text.fromString "GAME OVER. Press space.")
+                           then centered <| Text.height 30 <| Text.monospace (Text.fromString "Stack Overflow! Press space to continue.")
                            else empty]
     
 
@@ -496,7 +496,24 @@ render m =
 
 renderWaiting : Int -> Int -> Element
 renderWaiting w h = 
-    collage w h [(Text.fromString "Press SPACE to begin." |> Text.color white) |> centered |> toForm] |> color black
+    let
+        rw str = (Text.fromString str |> Text.color white) |> centered
+    in
+      (container w h middle <| flow down <| L.map rw ["Press SPACE to start.",
+                                                      "LEFT/RIGHT: Move Pete.",
+                                                      "UP: Pick up block.",
+                                                      "DOWN: Drop block.",
+                                                      "SPACE: Drop block from input stack.",
+                                                      "1,2,3,4: Drop +, -, *, /.",
+                                                      "SHIFT (+DOWN, SPACE, 1, 2, 3, 4): Drop and activate block."]) |> color black
+
+{-
+    let
+        rw str = (Text.fromString str |> Text.color white) |> centered |> toForm
+    in
+      collage w h [rw "Press SPACE to start."] |> color black
+-}
+--[flow down [rw "Press SPACE to start.", rw ""]] |> color black
 
 
 --SIGNAL
