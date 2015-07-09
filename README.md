@@ -11,6 +11,15 @@ Controls:
 * 1,2,3,4: Drop a +, -, \*, /.
 * SHIFT (+DOWN, SPACE, 1, 2, 3, 4): Drop and activate block.
 
+You can play the game at https://dl.dropboxusercontent.com/u/27883775/wiki/apps/namba/namba.html.
+
+Installation
+============
+
+* Follow directions to download elm at http://elm-lang.org/.
+* To build html file, write
+	elm-make Namba.elm --output=namba.html
+
 Log
 ===
 
