@@ -18,7 +18,8 @@ Installation
 
 * Follow directions to download elm at http://elm-lang.org/.
 * To build html file, write
-	elm-make Namba.elm --output=namba.html
+
+    elm-make Namba.elm --output=namba.html
 
 Log
 ===
