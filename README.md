@@ -11,7 +11,7 @@ Controls:
 * 1,2,3,4: Drop a +, -, \*, /.
 * SHIFT (+DOWN, SPACE, 1, 2, 3, 4): Drop and activate block.
 
-You can play the game at https://dl.dropboxusercontent.com/u/27883775/wiki/apps/namba/namba.html.
+You can play the game at https://dl.dropboxusercontent.com/u/27883775/wiki/apps/namba/namba.html (shortlink: http://bit.ly/playnamba).
 
 Installation
 ============
