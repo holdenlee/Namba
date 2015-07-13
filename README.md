@@ -17,12 +17,13 @@ Installation
 ============
 
 * Follow directions to download elm at http://elm-lang.org/.
-* To build html file, write
-
-    elm-make Namba.elm --output=namba.html
+* To build html file, open up command prompt in the folder and type "make".
 
 Log
 ===
+
+7-12-15:
+* Various beautifications.
 
 7-3-15:
 * Add game over screen.
