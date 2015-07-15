@@ -366,7 +366,7 @@ resolveSuccesses m =
 {-| Check for matching block just in the nth stack.-}
 resolveSuccess : Int -> Game -> Game 
 resolveSuccess n m = 
-    case (A.get m.x m.stacks) of
+    case (A.get n m.stacks) of
       Just ((BExpr (Leaf (AInt p)) _)::rest) -> 
           --clunky...
           case m.nextInts of
@@ -375,7 +375,7 @@ resolveSuccess n m =
             h::following -> 
                if p == h 
                then 
-                   {m | stacks <- A.set m.x rest m.stacks,
+                   {m | stacks <- A.set n rest m.stacks,
                         nextInts <- following,
                         score <- m.score + 1
                             --delete (SHOULD THIS BE THE BEHAVIOR?)
