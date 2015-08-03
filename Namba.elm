@@ -12,6 +12,7 @@ import Graphics.Input exposing (..)
 import Random exposing (..)
 import Debug exposing (..)
 import Text
+import Mouse as Mo
 
 import Tree exposing (..)
 import Utilities exposing (..)
@@ -28,10 +29,9 @@ type alias Expr = Tree Atom
 
 type alias PMatch = D.Dict Int Type
 
-{-| Bomb deletes one block, Clear deletes whole column.
-Currently, only BExpr, Copy, and Clear are used.
+{-| Clear deletes block.
 -}
-type Block = BExpr Expr Type | Copy | Bomb | Clear | Rock
+type Block = BExpr Expr Type | Copy | Clear
 
 {-| Example: t is (Var 0 -> Var 0) and t1 is (Int -> Int). Then applyType will match "Var 0" with Int and return the dictionary mapping "Var 0" to Int.
 pm is the existing mappings.
@@ -88,8 +88,8 @@ combineTrees t1 t2 =
       (Node li1, Leaf y) -> Node (li1++[Leaf y])
       (Node li1, Node li2) -> Node (li1++li2)
 
-{-| Apply the block b to the block b1 and obtain a list of blocks. This is called when block b is put on top of b1. -}
-apply : Block -> Block -> List Block
+{-| Apply the block b to the block b1 and obtain another block. This is called when block b is put on top of b1. -}
+apply : Block -> Block -> Maybe (Maybe Block, Maybe Block)
 apply b b1 = 
     case b |> watch "1" of 
       BExpr ex t  ->
@@ -97,7 +97,7 @@ apply b b1 =
             BExpr ex1 t1 ->
                 case (applyType D.empty (lchild t) t1) |> watch "3" of
                   Just pm -> 
-                      case (subst pm t) |> watch "4"of
+                      case (subst pm t) |> watch "4" of
                         Node [l, r] -> 
                             let
                                 t2 = r
@@ -105,46 +105,46 @@ apply b b1 =
                                 ex2 = (combineTrees ex ex1)
                             in
                               if (t2 |> watch "5") == Leaf TInt
-                              then [BExpr (Leaf <| AInt <| eval ex2) t2]
-                              else [BExpr (combineTrees ex ex1) (rchild t)]
-                        _ -> [b,b1]
+                              then Just (Just (BExpr (Leaf <| AInt <| eval ex2) t2), Nothing)
+                              else Just (Just (BExpr (combineTrees ex ex1) (rchild t)), Nothing)
+                        _ -> Nothing
                              --fail
-                  Nothing -> [b,b1]
+                  Nothing -> Nothing
                        --wrong type!
-            _ -> [b, b1]
-      Copy -> [b1,b1]
-      Bomb -> []
-      Clear -> [Clear]
-      Rock -> [Rock, b1]
+            _ -> Nothing
+      Copy -> Just (Just b1, Just b1)
+      Clear -> Just (Nothing, Nothing)
 
-{-| Apply block b to the stack (list of blocks) bs. Basically this is repeated application of `apply`.-}
-applyStack : Block -> List Block -> List Block
-applyStack b bs = 
-    case bs of
-      [] ->
-          case b of
-            Copy -> []
-            Bomb -> []
-            Clear -> []
-            _ -> [b]
-      h::rest ->
-          let
-              bs2 = apply b h
-          in
-            case bs2 of
-              [b2] -> applyStack b2 rest
-              _ -> bs2 ++ rest
+type PlaceCode = Null | Placed | PickedUp | PlacedAndPickedUp
 
+{-| Apply block b to the Maybe block bs. Output is (placed block, picked-up block, exit code. -}
+clickHole : Bool -> Maybe Block -> Maybe Block -> (Maybe Block, Maybe Block, PlaceCode)
+clickHole act b b2 = 
+    case b of
+      Nothing ->
+          (b2, b2, PickedUp)
+          --picked up block
+      Just b' ->
+          case b2 of 
+            Nothing -> (b, Nothing, Placed)
+            --placed at an empty hole
+            Just b2' -> 
+                 case apply b' b2' of
+                   Nothing -> (b2, Nothing, Null)
+                   --failed to place
+                   Just (c, c2) -> 
+                       if act then (c, c2, PlacedAndPickedUp) else (c, c2, Placed)
 
 --MODEL
 type alias Game = {w: Int,
                    h: Int,
-                   stacks : A.Array (List Block),
-                   x: Int,
+                   intH : Int,
+                   isPopUp : Int -> Int -> Bool,
+                   palette : A.Array (A.Array (Maybe Block)),
+                   prevLoc: Maybe (Int, Int),
                    curBlock : Maybe Block,
-                   activated: Bool,
+                   activated : Bool,
                    seed: Seed,
-                   inputs : List Block,
                    nextInput : Seed -> (Block, Seed),
                    nextInts : List Int,
                    spawnTime : Time,
@@ -157,6 +157,7 @@ type alias Game = {w: Int,
 type Model = Waiting | Ingame Game
 
 defWidth = 4
+intH = 10
 
 {-| Given a random number in [0,1], and a list of results with corresponding probabilities, choose a result. For example, 
     chooseByProbs x [(1,0.3), (2,0.7)]
@@ -212,34 +213,50 @@ defInputFunc = probListToInputFunc <| normalizeList
 defGetInts : Int -> Seed -> (List Int, Seed)
 defGetInts l s = generate (list l (int (-100) 100)) s
 
+set2 : (Int, Int) -> a -> A.Array (A.Array a) -> A.Array (A.Array a)
+set2 (i,j) it arr = A.set i (getA i arr |> A.set j it) arr
+
+fillIn : (Int, Int) -> Game -> Game
+fillIn (i,j) g = 
+    case g.palette |> getA i |> getA j of
+      Nothing -> 
+          if g.isPopUp i j 
+          then
+              let
+                  (b, s') = g.nextInput g.seed 
+              in
+                {g | palette <- set2 (i,j) (Just b) g.palette, 
+                     seed <- s'}          
+          else g
+      Just _ -> g
+
 {-| Start game with given seed.-}
 startGame : Int -> Game
 startGame n = 
     let 
-        h=10
-        (li,s) = generate (list h (customGenerator defInputFunc)) (initialSeed n)
-        (li',s') = defGetInts 5 s
-    in
-            {w=defWidth,
+        h=4
+        (li,s) = defGetInts 5 (initialSeed n)
+        g = {w=defWidth,
              h=h,
-             stacks=A.repeat defWidth [], 
-             x=0,
+             intH = intH,
+             isPopUp = (\i j -> j < 2),
+             palette = A.repeat h (A.repeat defWidth Nothing),
+             prevLoc = Nothing,
              curBlock = Nothing,
              activated = False,
-             seed = s', 
-             inputs = li,
+             seed = s,
              nextInput = defInputFunc,
-             nextInts = li',
+             nextInts = li,
              spawnTime = 20*second,
              spawnInts = defGetInts 1,
              score =0,
              timeSinceSpawn = 0,
              gameOver = False
                 }
-
-{-| Get the stack that Pete is standing above.-}
-curStack : Game -> List Block
-curStack m = M.withDefault [] <| A.get m.x m.stacks
+    in
+      for [0..(h-1)] g (\i g0 ->
+         for [0..(g.w-1)] g0 (\j g1 ->
+            fillIn (i,j) g1))
 
 tail' : List a -> List a
 tail' li = 
@@ -247,14 +264,9 @@ tail' li =
       [] -> []
       h::rest -> rest
 
-{-| Updates current stack with function `f`.-}
-updateCurStack : (List Block -> List Block) -> Game -> Game
-updateCurStack f m = 
-    {m | stacks <- A.set m.x (f <| curStack m) m.stacks}
-
 {-| Game is over if stack overflows.-}
 isGameOver : Game -> Bool
-isGameOver g = L.length g.nextInts > g.h
+isGameOver g = L.length g.nextInts > g.intH
 
 --UPDATE
 step : Input -> Model -> Model
@@ -281,107 +293,86 @@ start = Waiting
 spellDict = D.fromList [(1, opBlock "+"), (2, opBlock "-"), (3, opBlock "*"), (4, opBlock "/")]
 
 stepGame : Input -> Game -> Game
-stepGame inp m = 
+stepGame inp g = 
   --(watchSummary "stacks" (.stacks << getModel)) <| 
   watch "model" <| 
     case inp of
-      Activate b -> 
-          {m | activated <- b}
-      Left ->
-          {m | x <- (m.x-1)%(m.w)}
-      Right -> 
-          {m | x <- (m.x+1)%(m.w)}
-      Pickup ->
-          case (A.get m.x m.stacks, m.curBlock) of
-            (Just [],_) ->  m
-            (_, Just _) ->  m
-                --if either the stack is empty or already have a block, do not pick up one.
-            (Just (top::_), _) ->  {m | curBlock <- Just top}
-                                         |> updateCurStack tail'
-                                         |> resolveSuccesses
-                --pick up a block.
+      Activate b ->
+          {g | activated <- b}
       Spell i -> 
           --look up the ith operation and apply it to the stack.
           let
-              b = M.withDefault (numBlock 0) <| D.get i spellDict
+              b = D.get i spellDict
           in
-            if L.length (curStack m) < m.h
-            then m |> updateCurStack (if m.activated then applyStack b else (\x -> b::x))
-                   |> resolveSuccesses
-            else m      
-      Drop -> 
-          case m.curBlock of
-            Nothing ->  m 
-                --no block to drop!
-            Just b -> 
-                if L.length (curStack m) < m.h
-                then {m | curBlock <- Nothing} 
-                          |> updateCurStack (if m.activated then applyStack b else (\x -> b::x))
-                          |> resolveSuccesses
-                else m
+            {g | curBlock <- b}
+      Click (x,y) ->
+          let
+              (i,j) = getLocFromMouse (x,y) g
+              (b, b2, code) = clickHole g.activated g.curBlock (g.palette |> getA i |> getA j)
+          in
+            {g | palette <- set2 (i,j) b g.palette,
+                 curBlock <- b2} |> (case code of 
+                                       Null -> (\g0 -> {g0 | prevLoc <- Nothing})
+                                       Placed -> 
+                                           case g.prevLoc of
+                                             Just (i',j') -> 
+                                                 (\g0 -> {g0 | palette <- set2 (i',j') Nothing g0.palette, prevLoc <- Nothing} |> fillIn (i',j') |> fillIn (i,j))
+                                             Nothing -> fillIn (i,j)
+                                       PickedUp -> (\g0 -> {g0 | prevLoc <- Just (i,j)})
+                                       PlacedAndPickedUp -> 
+                                           (case g.prevLoc of
+                                             Just (i',j') -> 
+                                                 (\g0 -> {g0 | palette <- set2 (i',j') Nothing g0.palette, prevLoc <- Nothing} |> fillIn (i',j') |> fillIn (i,j))
+                                             Nothing -> fillIn (i,j)) >> (\g0 -> {g0 | curBlock <- b, prevLoc <- Just (i,j)})) |> resolveSuccesses
+--should make b2 equal to b here??
+--bug when stack is empty?
       TimeDelta td ->
           let
-              newT = m.timeSinceSpawn + td
+              newT = g.timeSinceSpawn + td
           in
             --assume there isn't so much lag that two time intervals pass between updates
-            if newT > m.spawnTime 
+            if newT > g.spawnTime 
             then 
                 --add a new block to the right-hand stack (using the spawnInts function), and reset timeSinceSpawn.
                 let
-                    (li, s') = m.spawnInts m.seed
+                    (li, s') = g.spawnInts g.seed
                 in
-                   {m | seed <- s',
-                        timeSinceSpawn <- newT - m.spawnTime,
-                        nextInts <- m.nextInts ++ li,
-                        spawnTime <- 200*second/((toFloat m.score) + 10)
+                   {g | seed <- s',
+                        timeSinceSpawn <- newT - g.spawnTime,
+                        nextInts <- g.nextInts ++ li,
+                        spawnTime <- 200*second/((toFloat g.score) + 10)
                         }
-            else  {m | timeSinceSpawn <- newT}
-      BlockFromInput -> 
-          --drop a block from input stack.
-          case m.inputs of
-            [] ->  m 
-                  --shouldn't happen
-            h::rest -> 
-               if L.length (curStack m) < m.h
-               then
-                   let
-                       (b, s) = m.nextInput m.seed
-                   in
-                      {m | seed <- s,
-                           inputs <- rest ++ [b]} 
-                       |> updateCurStack (if m.activated then applyStack h else (\x -> h::x))
-                       |> resolveSuccesses
-               else 
-                    m
+            else  {g | timeSinceSpawn <- newT}
 
 {-| Check for blocks that match the integers to be made. Remove them and increment score.-}
 resolveSuccesses :  Game -> Game 
-resolveSuccesses m = 
-    case L.foldl (resolveSuccess) m [0..(m.w-1)] of
-       m2 ->
-          if L.length m2.nextInts == L.length m.nextInts 
-          then m2
-          else resolveSuccesses m2
---this does it all in one go. (However, may want to change so does only 1 at a time, for sake of visual effects.)                
+resolveSuccesses g = 
+    let
+        g' = for [0..(g.h-1)] g (\i g0 ->
+                for [0..(g.w-1)] g0 (\j g1 -> 
+                   resolveSuccess (i,j) g1))
+    in
+      if g.score == g'.score 
+      then g
+      else resolveSuccesses g'
+              
 {-| Check for matching block just in the nth stack.-}
-resolveSuccess : Int -> Game -> Game 
-resolveSuccess n m = 
-    case (A.get n m.stacks) of
-      Just ((BExpr (Leaf (AInt p)) _)::rest) -> 
+resolveSuccess : (Int, Int) -> Game -> Game 
+resolveSuccess (i,j) m = 
+    case (m.palette |> getA i |> getA j) of
+      Just (BExpr (Leaf (AInt p)) _) -> 
           --clunky...
           case m.nextInts of
-            [] ->  m
+            [] -> m
                   --no more blocks left to match
             h::following -> 
                if p == h 
-               then 
-                   {m | stacks <- A.set n rest m.stacks,
-                        nextInts <- following,
-                        score <- m.score + 1
-                            --delete (SHOULD THIS BE THE BEHAVIOR?)
-                   }
-               else 
-                   m
+               then {m | palette <- set2 (i,j) Nothing m.palette,
+                         nextInts <- following,
+                         score <- m.score + 1
+                             --delete (SHOULD THIS BE THE BEHAVIOR?)
+                    } |> fillIn (i,j)
+               else m
       _ -> m
 
 {-| Evaluate the expression to give an integer. The type corresponding to `ex` must be Int!-}
@@ -422,8 +413,9 @@ showExpr ex =
       Leaf x -> toString x
       Node li -> (\x -> "(" ++ x ++ ")") <| intersperse " " <| L.map showExpr li
 
-bwidth = 200
-bheight = 40
+bwidth = 150
+bheight = 150
+bheight2 = 40
 
 --VIEW
 
@@ -431,15 +423,6 @@ bheight = 40
 collageAbs : Int -> Int -> List (Int,Int) -> List Element -> Element
 collageAbs w h tuples elems = 
     collage w h (zipMap (\(x,y) -> \elem -> move ( (-(toFloat w)/2 + (toFloat (widthOf elem))/2 + toFloat x),  (-(toFloat h)/2 + (toFloat (heightOf elem))/2 + toFloat y)) (toForm elem)) tuples elems)
-
-renderPete : Game -> Element
-renderPete m = 
-    case m.curBlock of
-      Nothing -> container bwidth (bheight+30) midBottom <| image 30 30 "pete.gif"
-      Just b -> (renderBlock b) `above` (container bwidth 30 middle <| image 30 30 "hold.gif")
-
-renderTop : Game -> Element
-renderTop m = flow right <| L.map (\i -> if i==m.x then renderPete ( m) else (container bwidth (bheight + 30) middle empty)) [0..(m.w-1)]
 
 renderBlock' : Int -> Int -> Block -> Element
 renderBlock' w h b = 
@@ -461,23 +444,30 @@ renderBlock' w h b =
 renderBlock : Block -> Element
 renderBlock = renderBlock' bwidth bheight
 
---h is the number of blocks high
-renderStack : Int -> List Block -> Element 
-renderStack h li = container bwidth (h*bheight) midBottom <| flow down (L.map renderBlock li)
+renderMBlock : Maybe Block -> Element
+renderMBlock mb = 
+    case mb of 
+      Just b -> renderBlock b 
+      Nothing -> container bwidth bheight middle empty
 
-renderStacks : Int -> A.Array (List Block) -> Element
-renderStacks n = (flow right) << (L.map (renderStack n)) << A.toList
+renderRow : Int -> A.Array (Maybe Block) -> Element
+renderRow w li = container (w*bwidth) bheight midLeft <| flow right (L.map renderMBlock <| A.toList li)
+
+--h is the number of blocks high
+{-renderStack : Int -> List Block -> Element 
+renderStack h li = container bwidth (h*bheight) midBottom <| flow down (L.map renderBlock li)-}
+
+renderPalette : Int -> A.Array (A.Array (Maybe Block)) -> Element
+renderPalette n = (flow down) << (L.map (renderRow n)) << A.toList
 
 column w h = container w h midBottom
 
-renderInputs : Int -> List Block -> Element
-renderInputs h li = column 60 (bheight*(h+1) + 30) <| flow down <| L.map (renderBlock' 60 bheight) li
-
+--bheight2*intH
 renderNextInts : Int -> List Int -> Element
-renderNextInts h li = column 60 (bheight*(h+1) + 30) <| flow down <| L.map (renderBlock' 60 bheight << numBlock) li
+renderNextInts h li = column 60 (bheight*h) <| flow down <| L.map (renderBlock' 60 bheight2 << numBlock) li
 
 renderInfoPanel : Game -> Element
-renderInfoPanel ( m) = container 60 (bheight*(m.h+1) + 30) middle <| centered <| (Text.height 30 <| Text.monospace (Text.fromString (toString m.score)))
+renderInfoPanel m = container bwidth (bheight*(m.h)) middle <| flow down [centered <| (Text.height 30 <| Text.monospace (Text.fromString (toString m.score))), renderMBlock m.curBlock]
 
 renderGame : Game -> Element
 renderGame g = 
@@ -489,13 +479,12 @@ renderGame g =
 renderGame' : Game -> Element
 renderGame' m = 
     flow right
-         [renderInputs m.h m.inputs,
-          renderTop m `above` renderStacks m.h m.stacks,
+         [renderPalette m.h m.palette,
           renderNextInts m.h m.nextInts,
           renderInfoPanel m]
 
-totalW = 4 * bwidth + 3*60
-totalH = 11 * bheight + 30
+totalW = 4 * bwidth + 60 + 150
+totalH = 4 * bheight
 
 render : Model -> Element
 render m = 
@@ -517,7 +506,13 @@ renderWaiting w h =
                                                       "SHIFT (+DOWN, SPACE, 1, 2, 3, 4): Drop and activate block."]) |> color black
 
 --SIGNAL
-type Input = Activate Bool | Drop | Pickup | Left | Right | BlockFromInput | StartGame Time | TimeDelta Time | Spell Int
+type Input = Click (Int, Int) | Activate Bool | BlockFromInput | StartGame Time | TimeDelta Time | Spell Int
+
+click : Signal Input
+click = map Click <| sampleOn Mo.clicks Mo.position
+
+getLocFromMouse : (Int, Int) -> Game -> (Int, Int)
+getLocFromMouse (x,y) g = (clamp 0 (g.h-1) (y // bheight), clamp 0 (g.w-1) (x // bwidth))
 
 whenPress : Signal Bool -> Signal Bool
 whenPress k = filter identity False <| dropRepeats k
@@ -534,14 +529,8 @@ spell = mergeMany (L.map (\i -> keyCodeToState (48+i) (Spell i)) [1..4])
 37 40 39
 -}
 input : Signal Input 
-input = mergeMany [map Activate shift,
-                   --keyCodeToState 65 Activate, 
-                   keyCodeToState 40 Drop,
-                   --down
-                   keyCodeToState 38 Pickup,
-                   --up
-                   keyCodeToState 37 Left,
-                   keyCodeToState 39 Right,
+input = mergeMany [click,
+                   map Activate shift,
                    keyCodeToState 32 BlockFromInput,
                    --space
                    map (\(i,_) -> StartGame i) (timestamp <| whenPress (isDown 13)),

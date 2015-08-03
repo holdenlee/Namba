@@ -61,10 +61,22 @@ while f x0 update = if (f x0)
                     then (while f (update x0) update) 
                     else x0
 
+for : List a -> b -> (a -> b -> b) -> b
+for li x0 f = foldl f x0 li
+
+forA : A.Array a -> b -> (a -> b -> b) -> b
+forA li x0 f = A.foldl f x0 li
+
+
 --getting from dicts and lists
 --def is default
 getD:comparable -> a -> D.Dict comparable a -> a
 getD str def d = M.withDefault def (D.get str d)
+
+getA: Int -> A.Array a -> a
+getA i arr = 
+    case A.get i arr of
+      Just x -> x
 
 getL: List a -> Int -> a -> a
 getL li i def = M.withDefault def (li!i)
