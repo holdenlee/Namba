@@ -117,23 +117,28 @@ apply b b1 =
 
 type PlaceCode = Null | Placed | PickedUp | PlacedAndPickedUp
 
+--should make an invalid click clear current block
 {-| Apply block b to the Maybe block bs. Output is (placed block, picked-up block, exit code. -}
-clickHole : Bool -> Maybe Block -> Maybe Block -> (Maybe Block, Maybe Block, PlaceCode)
-clickHole act b b2 = 
+clickHole : Maybe Block -> Maybe Block -> (Maybe Block, Maybe Block, PlaceCode)
+clickHole b b2 = 
     case b of
       Nothing ->
           (b2, b2, PickedUp)
-          --picked up block
+          --no block in hand, so pick up block
       Just b' ->
           case b2 of 
             Nothing -> (b, Nothing, Placed)
             --placed at an empty hole
             Just b2' -> 
                  case apply b' b2' of
-                   Nothing -> (b2, Nothing, Null)
-                   --failed to place
+                   Nothing -> (b2, b2, PickedUp)
+                   --failed to place, so pick up b2 instead
                    Just (c, c2) -> 
-                       if act then (c, c2, PlacedAndPickedUp) else (c, c2, Placed)
+                       (c, c2, 
+                         case c2 of
+                           Just _ -> Placed 
+                           --copy
+                           Nothing -> PlacedAndPickedUp)
 
 --MODEL
 type alias Game = {w: Int,
@@ -204,10 +209,14 @@ normalizeList li =
 {-| Default function giving the next input.-}
 defInputFunc : Seed -> (Block, Seed)
 defInputFunc = probListToInputFunc <| normalizeList 
+               ((L.map (\x -> (numBlock x,2)) ([1..6]++[10]))++
+               (L.map (\x -> (numBlock x,1)) ([(-10)..0]++[7..9]))++
+               [(Clear, 1), (Copy, 2)])
+{-
                ((L.map (\x -> (numBlock x,1)) [(-10)..10])
-                ++ [(Clear, 1),
-                    (Copy, 3)
-                    ])
+                ++ [(Copy, 1)
+                    ])-}
+--(Clear, 1),
 
 {-| Default function giving the next integer to make.-}
 defGetInts : Int -> Seed -> (List Int, Seed)
@@ -304,11 +313,11 @@ stepGame inp g =
           let
               b = D.get i spellDict
           in
-            {g | curBlock <- b}
+            {g | curBlock <- b, prevLoc <- Nothing}
       Click (x,y) ->
           let
               (i,j) = getLocFromMouse (x,y) g
-              (b, b2, code) = clickHole g.activated g.curBlock (g.palette |> getA i |> getA j)
+              (b, b2, code) = clickHole g.curBlock (g.palette |> getA i |> getA j)
           in
             {g | palette <- set2 (i,j) b g.palette,
                  curBlock <- b2} |> (case code of 
