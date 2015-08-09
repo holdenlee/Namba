@@ -66,27 +66,6 @@ subst pm t =
             _ -> t
       Node li -> Node (L.map (subst pm) li)
 
-{-| Get the left child of a tree-}
-lchild : Tree a -> Tree a
-lchild t = case t of
-             Node [l,r] -> l
-             _ -> t 
-                 -- fail (it is a leaf)
-
-{-| Get the right child of a tree-}
-rchild : Tree a -> Tree a
-rchild t = case t of
-             Node [l,r] -> r
-             _ -> t
-
-{-| Combine the children of two trees. If one tree (or both) is a leaf, make it into a child.-}
-combineTrees : Tree a -> Tree a -> Tree a
-combineTrees t1 t2 = 
-    case (t1,t2) of
-      (Leaf x, Leaf y) -> Node [Leaf x, Leaf y]
-      (Leaf x, Node li2) -> Node ((Leaf x)::li2)
-      (Node li1, Leaf y) -> Node (li1++[Leaf y])
-      (Node li1, Node li2) -> Node (li1++li2)
 
 {-| Apply the block b to the block b1 and obtain a list of blocks. This is called when block b is put on top of b1. -}
 apply : Block -> Block -> List Block
@@ -552,3 +531,28 @@ input = mergeMany [map Activate shift,
                   ]
 
 main = map render (foldp step start input)
+
+--LEVELS
+
+type alias Bonus = {cond : Game -> Bool,
+                    name : String,
+                    reward : Int}
+
+type alias Level = {name : String,
+                    goalAchieved : Game -> Bool,
+                    bonuses : List Bonus}
+
+type alias MetaInfo = {maxSpells : Int,
+                       curSpells : D.Dict Int Block,
+                       unlockedSpells : List (Spell, Int),
+                       upgradableSpells : List (Spell, Int),
+                       lockedSpells : List (LTree Spell),
+                       unlockedLevels : List (Level, List Int),
+                                      --bonuses achieved
+                       lockedLevels : List (LTree Level),
+                       score : Int}
+                       
+--showPrep : display spells, levels.
+
+
+                        
